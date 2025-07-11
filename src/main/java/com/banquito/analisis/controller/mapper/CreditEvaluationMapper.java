@@ -8,7 +8,6 @@ import org.mapstruct.factory.Mappers;
 
 @Mapper(componentModel = "spring")
 public interface CreditEvaluationMapper {
-    CreditEvaluationMapper INSTANCE = Mappers.getMapper(CreditEvaluationMapper.class);
 
     @Mapping(source = "idSolicitud", target = "idSolicitud")
     @Mapping(source = "resultadoAutomatico", target = "estado")
