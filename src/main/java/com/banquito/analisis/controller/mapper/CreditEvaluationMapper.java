@@ -4,7 +4,6 @@ import com.banquito.analisis.controller.dto.CreditEvaluationDTO;
 import com.banquito.analisis.model.EvaluacionCrediticia;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
-import org.mapstruct.factory.Mappers;
 
 @Mapper(componentModel = "spring")
 public interface CreditEvaluationMapper {
