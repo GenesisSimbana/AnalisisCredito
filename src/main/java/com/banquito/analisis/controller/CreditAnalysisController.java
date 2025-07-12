@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/v1/credit-analysis")
+@RequestMapping("/api/v1/credit-analysis")
 @RequiredArgsConstructor
 @Tag(name = "Motor de Análisis Crediticio", description = "API para evaluación de solicitudes de crédito automotriz")
 public class CreditAnalysisController {
