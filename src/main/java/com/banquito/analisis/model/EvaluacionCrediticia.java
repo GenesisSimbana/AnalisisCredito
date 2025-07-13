@@ -40,7 +40,7 @@ public class EvaluacionCrediticia {
     @Column(name = "decision_final")
     private AnalisisEnums.DecisionFinal decisionFinal;
 
-    @Column(name = "justificacion_final", length = 30)
+    @Column(name = "justificacion_final", length = 255)
     private String justificacionFinal;
 
     @Column(name = "version", nullable = false)

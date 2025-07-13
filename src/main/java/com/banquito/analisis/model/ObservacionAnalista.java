@@ -22,7 +22,7 @@ public class ObservacionAnalista {
     @Column(name = "decision_analista", nullable = false)
     private AnalisisEnums.DecisionAutoEnum decisionAnalista;
 
-    @Column(name = "justificacion", nullable = false, length = 30)
+    @Column(name = "justificacion", nullable = false, length = 255)
     private String justificacion;
 
     @Column(name = "fecha_hora", nullable = false)

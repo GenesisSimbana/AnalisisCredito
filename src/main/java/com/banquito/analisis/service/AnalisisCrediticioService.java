@@ -31,63 +31,95 @@ public class AnalisisCrediticioService {
      */
     @Transactional
     public EvaluacionCrediticia evaluarSolicitud(Integer idSolicitud) {
+        // 0. Verificar si ya existe una evaluación para esta solicitud
+        Optional<EvaluacionCrediticia> evaluacionExistente = evaluacionCrediticiaRepository.findByIdSolicitud(idSolicitud);
+        if (evaluacionExistente.isPresent()) {
+            throw new IllegalStateException("Ya existe una evaluación para la solicitud " + idSolicitud + ". No se puede reevaluar automáticamente.");
+        }
+
         // 1. Obtener datos de Originación
         SolicitudOriginacionDTO solicitud = originacionClient.obtenerSolicitud(idSolicitud.toString());
         if (!"PENDIENTE_EVALUACION".equalsIgnoreCase(solicitud.getEstado())) {
             throw new IllegalStateException("Solo se puede evaluar solicitudes pendientes");
         }
 
-        // 2. Consultar buró externo (simulado aquí, reemplaza por integración real si la tienes)
-        ConsultaBuro consultaBuro = new ConsultaBuro();
-        consultaBuro.setIdSolicitud(idSolicitud);
-        consultaBuro.setFechaConsulta(LocalDateTime.now());
-        consultaBuro.setEstadoConsulta(AnalisisEnums.EstadoConsultaBuroEnum.EXITOSA);
-        consultaBuro.setFuenteBuro("EXTERNO");
-        consultaBuro.setScoreExterno(new BigDecimal("800"));
-        consultaBuro.setCuentasActivas(3);
-        consultaBuro.setCuentasMorosas(0);
-        consultaBuro.setMontoTotalAdeudado(new BigDecimal("15000"));
-        consultaBuro.setMontoMorosoTotal(BigDecimal.ZERO);
-        consultaBuro.setDiasMoraPromedio(new BigDecimal("0"));
-        consultaBuro.setFechaPrimeraMora(LocalDate.now());
-        consultaBuro.setCapacidadPago(null); // Se calcula en la evaluación
-        consultaBuro.setVersion(1);
-        consultaBuro = consultaBuroRepository.save(consultaBuro);
+        // 2. Obtener la cédula del cliente desde la solicitud
+        String cedula = solicitud.getCedula();
+        if (cedula == null || cedula.isEmpty()) {
+            throw new IllegalStateException("No se pudo obtener la cédula del cliente desde la solicitud");
+        }
 
-        // 3. Evaluación interna
-        BigDecimal ingresoNeto = solicitud.getIngresos().subtract(solicitud.getEgresos());
-        BigDecimal capacidadPago = ingresoNeto.multiply(new BigDecimal("0.3"));
-        consultaBuro.setCapacidadPago(capacidadPago);
-        consultaBuroRepository.save(consultaBuro);
+        // 3. Consultar el cliente por cédula y obtener el score interno
+        var cliente = originacionClient.obtenerClientePorCedula(cedula);
+        BigDecimal scoreInterno = cliente.getScoreInterno();
+        if (scoreInterno == null) {
+            throw new IllegalStateException("No se pudo obtener el score interno del cliente");
+        }
+
+        // 4. Calcular capacidad de pago usando ingresos y egresos del cliente
+        BigDecimal ingresos = cliente.getIngresos();
+        BigDecimal egresos = cliente.getEgresos();
+        
+        if (ingresos == null || egresos == null) {
+            throw new IllegalStateException("No se pudieron obtener los ingresos o egresos del cliente");
+        }
+
+        // Capacidad de pago = Ingresos - Egresos
+        BigDecimal capacidadPago = ingresos.subtract(egresos);
+        
+        // Validar que la capacidad de pago sea positiva
+        if (capacidadPago.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalStateException("El cliente no tiene capacidad de pago positiva");
+        }
 
         AnalisisEnums.EvaluacionResultado resultado;
         AnalisisEnums.CategoriaRiesgo riesgo;
         String observaciones;
 
-        if (capacidadPago.compareTo(solicitud.getCuotaMensual()) < 0) {
-            resultado = AnalisisEnums.EvaluacionResultado.RECHAZADO;
-            riesgo = AnalisisEnums.CategoriaRiesgo.ALTO;
-            observaciones = "Capacidad de pago insuficiente";
-        } else if (consultaBuro.getScoreExterno().compareTo(new BigDecimal("750")) > 0 && consultaBuro.getCuentasMorosas() == 0) {
+        // 5. Lógica de decisión automática usando el score interno y capacidad de pago
+        if (scoreInterno.compareTo(new BigDecimal("700")) > 0 && capacidadPago.compareTo(new BigDecimal("500")) > 0) {
             resultado = AnalisisEnums.EvaluacionResultado.APROBADO;
             riesgo = AnalisisEnums.CategoriaRiesgo.BAJO;
-            observaciones = "Score alto y sin cuentas morosas";
-        } else if (consultaBuro.getScoreExterno().compareTo(new BigDecimal("600")) >= 0 && consultaBuro.getScoreExterno().compareTo(new BigDecimal("750")) <= 0) {
+            observaciones = "Score interno alto (" + scoreInterno + ") y capacidad de pago adecuada (" + capacidadPago + "): aprobado automático";
+        } else if (scoreInterno.compareTo(new BigDecimal("600")) >= 0 && capacidadPago.compareTo(new BigDecimal("300")) > 0) {
             resultado = AnalisisEnums.EvaluacionResultado.EN_REVISION;
             riesgo = AnalisisEnums.CategoriaRiesgo.MEDIO;
-            observaciones = "Score medio, requiere revisión manual";
+            observaciones = "Score interno medio (" + scoreInterno + ") y capacidad de pago moderada (" + capacidadPago + "): requiere revisión manual";
         } else {
             resultado = AnalisisEnums.EvaluacionResultado.RECHAZADO;
             riesgo = AnalisisEnums.CategoriaRiesgo.ALTO;
-            observaciones = "Score bajo o cuentas morosas";
+            observaciones = "Score interno bajo (" + scoreInterno + ") o capacidad de pago insuficiente (" + capacidadPago + "): rechazado automático";
         }
 
-        // 4. Guardar evaluación
+        // 6. Verificar si ya existe una consulta de buró para esta solicitud
+        Optional<ConsultaBuro> consultaExistente = consultaBuroRepository.findByIdSolicitud(idSolicitud);
+        if (consultaExistente.isPresent()) {
+            throw new IllegalStateException("Ya existe una consulta de buró para la solicitud " + idSolicitud);
+        }
+
+        // 7. Crear y guardar consulta de buró con la capacidad de pago calculada
+        ConsultaBuro consultaBuro = new ConsultaBuro();
+        consultaBuro.setIdSolicitud(idSolicitud);
+        consultaBuro.setFechaConsulta(LocalDateTime.now());
+        consultaBuro.setCapacidadPago(capacidadPago);
+        consultaBuro.setEstadoConsulta(AnalisisEnums.EstadoConsultaBuroEnum.EXITOSA);
+        consultaBuro.setFuenteBuro("INTERNO");
+        consultaBuro.setScoreExterno(scoreInterno); // Usamos scoreInterno como scoreExterno para simplificar
+        consultaBuro.setCuentasActivas(0); // Valores por defecto ya que no tenemos datos de buró real
+        consultaBuro.setCuentasMorosas(0);
+        consultaBuro.setMontoTotalAdeudado(BigDecimal.ZERO);
+        consultaBuro.setMontoMorosoTotal(BigDecimal.ZERO);
+        consultaBuro.setDiasMoraPromedio(BigDecimal.ZERO);
+        consultaBuro.setFechaPrimeraMora(LocalDate.now());
+        consultaBuro.setVersion(1);
+        consultaBuro = consultaBuroRepository.save(consultaBuro);
+
+        // 8. Guardar evaluación
         EvaluacionCrediticia evaluacion = new EvaluacionCrediticia();
         evaluacion.setIdSolicitud(idSolicitud);
         evaluacion.setConsultaBuro(consultaBuro);
         evaluacion.setFechaEvaluacion(LocalDateTime.now());
-        evaluacion.setScoreInterno(null); // Si tienes lógica de score interno, calcula aquí
+        evaluacion.setScoreInterno(scoreInterno);
         evaluacion.setResultadoAutomatico(resultado);
         evaluacion.setCategoriaRiesgo(riesgo);
         evaluacion.setDecisionFinal(null);
